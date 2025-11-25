@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双人行程交集表</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Arial', sans-serif; }
+        body { padding: 2rem; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { text-align: center; margin-bottom: 1.5rem; color: #333; }
+        .form-section { display: flex; gap: 2rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .person-form { flex: 1; min-width: 300px; padding: 1.5rem; border: 1px solid #eee; border-radius: 6px; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #555; }
+        input, select, textarea { width: 100%; padding: 0.8rem; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem; }
+        button { width: 100%; padding: 1rem; background-color: #2196F3; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; transition: background 0.3s; }
+        button:hover { background-color: #1976D2; }
+        .schedule-section { margin-top: 2rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #333; font-weight: 600; }
+        .intersection { background-color: #E3F2FD; font-weight: 600; }
+        .delete-btn { background-color: #f44336; padding: 0.5rem 1rem; font-size: 0.9rem; }
+        .delete-btn:hover { background-color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>双人行程规划与交集查询</h1>
+
+        <!-- 行程录入表单 -->
+        <div class="form-section">
+            <div class="person-form">
+                <h2>人员A 行程录入</h2>
+                <form id="formA">
+                    <div class="form-group">
+                        <label for="a-date">日期</label>
+                        <input type="date" id="a-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="a-start">开始时间（几点几分）</label>
+                        <input type="time" id="a-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="a-end">结束时间（几点几分）</label>
+                        <input type="time" id="a-end" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="a-event">行程内容</label>
+                        <textarea id="a-event" rows="2" required placeholder="例如：开会、出差、休息等"></textarea>
+                    </div>
+                    <button type="submit">添加行程</button>
+                </form>
+            </div>
+
+            <div class="person-form">
+                <h2>人员B 行程录入</h2>
+                <form id="formB">
+                    <div class="form-group">
+                        <label for="b-date">日期</label>
+                        <input type="date" id="b-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="b-start">开始时间（几点几分）</label>
+                        <input type="time" id="b-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="b-end">结束时间（几点几分）</label>
+                        <input type="time" id="b-end" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="b-event">行程内容</label>
+                        <textarea id="b-event" rows="2" required placeholder="例如：开会、出差、休息等"></textarea>
+                    </div>
+                    <button type="submit">添加行程</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 行程展示与交集表格 -->
+        <div class="schedule-section">
+            <h2>行程总览与时间交集</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>人员A 行程</th>
+                        <th>人员B 行程</th>
+                        <th>时间交集</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="scheduleTable">
+                    <!-- 行程数据将动态渲染到这里 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 本地存储键名
+        const STORAGE_KEY_A = 'personASchedules';
+        const STORAGE_KEY_B = 'personBSchedules';
+
+        // 初始化：从本地存储加载行程数据
+        function initSchedules() {
+            const aSchedules = JSON.parse(localStorage.getItem(STORAGE_KEY_A)) || [];
+            const bSchedules = JSON.parse(localStorage.getItem(STORAGE_KEY_B)) || [];
+            return { aSchedules, bSchedules };
+        }
+
+        // 保存行程到本地存储
+        function saveSchedule(person, schedule) {
+            const key = person === 'A' ? STORAGE_KEY_A : STORAGE_KEY_B;
+            const schedules = JSON.parse(localStorage.getItem(key)) || [];
+            schedules.push({ id: Date.now(), ...schedule }); // 添加唯一ID用于删除
+            localStorage.setItem(key, JSON.stringify(schedules));
+        }
+
+        // 删除行程
+        function deleteSchedule(person, id) {
+            const key = person === 'A' ? STORAGE_KEY_A : STORAGE_KEY_B;
+            let schedules = JSON.parse(localStorage.getItem(key)) || [];
+            schedules = schedules.filter(item => item.id !== id);
+            localStorage.setItem(key, JSON.stringify(schedules));
+            renderScheduleTable(); // 重新渲染表格
+        }
+
+        // 计算两个时间区间的交集
+        function calculateIntersection(start1, end1, start2, end2) {
+            // 转换为时间戳（分钟）便于比较
+            const timeToMin = (timeStr) => {
+                const [hour, min] = timeStr.split(':').map(Number);
+                return hour * 60 + min;
+            };
+
+            const s1 = timeToMin(start1);
+            const e1 = timeToMin(end1);
+            const s2 = timeToMin(start2);
+            const e2 = timeToMin(end2);
+
+            // 无交集的情况
+            if (e1 <= s2 || e2 <= s1) return '无';
+
+            // 计算交集的起止时间（分钟转时分格式）
+            const intersectStartMin = Math.max(s1, s2);
+            const intersectEndMin = Math.min(e1, e2);
+            const formatTime = (min) => {
+                const hour = Math.floor(min / 60).toString().padStart(2, '0');
+                const minute = (min % 60).toString().padStart(2, '0');
+                return `${hour}:${minute}`;
+            };
+
+            return `${formatTime(intersectStartMin)} - ${formatTime(intersectEndMin)}`;
+        }
+
+        // 渲染行程表格（按日期分组，展示交集）
+        function renderScheduleTable() {
+            const { aSchedules, bSchedules } = initSchedules();
+            const tableBody = document.getElementById('scheduleTable');
+            tableBody.innerHTML = ''; // 清空表格
+
+            // 合并所有日期，去重后排序
+            const allDates = [
+                ...aSchedules.map(item => item.date),
+                ...bSchedules.map(item => item.date)
+            ].filter((date, index, self) => self.indexOf(date) === index)
+             .sort((a, b) => new Date(a) - new Date(b));
+
+            // 按日期渲染每行数据
+            allDates.forEach(date => {
+                // 获取当天两人的行程（默认取第一条，可扩展为多行程展示）
+                const aSchedule = aSchedules.find(item => item.date === date) || {};
+                const bSchedule = bSchedules.find(item => item.date === date) || {};
+
+                // 计算交集
+                const intersection = aSchedule.start && bSchedule.start 
+                    ? calculateIntersection(aSchedule.start, aSchedule.end, bSchedule.start, bSchedule.end)
+                    : '无';
+
+                // 创建表格行
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${date}</td>
+                    <td>
+                        ${aSchedule.event ? `${aSchedule.start} - ${aSchedule.end}<br>${aSchedule.event}` : '无行程'}
+                        ${aSchedule.id ? `<br><button class="delete-btn" onclick="deleteSchedule('A', ${aSchedule.id})">删除</button>` : ''}
+                    </td>
+                    <td>
+                        ${bSchedule.event ? `${bSchedule.start} - ${bSchedule.end}<br>${bSchedule.event}` : '无行程'}
+                        ${bSchedule.id ? `<br><button class="delete-btn" onclick="deleteSchedule('B', ${bSchedule.id})">删除</button>` : ''}
+                    </td>
+                    <td class="${intersection !== '无' ? 'intersection' : ''}">${intersection}</td>
+                    <td>
+                        ${aSchedule.id && bSchedule.id ? 
+                            `<button onclick="window.location.reload()">刷新交集</button>` : 
+                            '完善两人行程后显示'}
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+
+            // 若无任何行程，显示提示
+            if (allDates.length === 0) {
+                const emptyRow = document.createElement('tr');
+                emptyRow.innerHTML = '<td colspan="5" style="text-align: center; color: #999;">暂无行程数据，请添加行程</td>';
+                tableBody.appendChild(emptyRow);
+            }
+        }
+
+        // 绑定表单提交事件
+        function bindFormSubmit() {
+            // 人员A表单
+            document.getElementById('formA').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const schedule = {
+                    date: document.getElementById('a-date').value,
+                    start: document.getElementById('a-start').value,
+                    end: document.getElementById('a-end').value,
+                    event: document.getElementById('a-event').value
+                };
+                saveSchedule('A', schedule);
+                e.target.reset(); // 重置表单
+                renderScheduleTable(); // 重新渲染表格
+            });
+
+            // 人员B表单
+            document.getElementById('formB').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const schedule = {
+                    date: document.getElementById('b-date').value,
+                    start: document.getElementById('b-start').value,
+                    end: document.getElementById('b-end').value,
+                    event: document.getElementById('b-event').value
+                };
+                saveSchedule('B', schedule);
+                e.target.reset(); // 重置表单
+                renderScheduleTable(); // 重新渲染表格
+            });
+        }
+
+        // 页面加载完成后初始化
+        window.onload = () => {
+            bindFormSubmit();
+            renderScheduleTable();
+        };
+    </script>
+</body>
+</html>
