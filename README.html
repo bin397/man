@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微信双人行程协作</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+        body { padding: 15px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h3 { color: #2d3748; margin-bottom: 15px; font-size: 18px; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 4px; color: #4a5568; font-size: 14px; }
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 15px; }
+        button { width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; }
+        button:hover { background: #2563eb; }
+        .trip-list { margin-top: 10px; }
+        .trip-item { padding: 12px; border-bottom: 1px solid #f0f0f0; }
+        .trip-item:last-child { border-bottom: none; }
+        .trip-date { font-weight: bold; color: #3b82f6; font-size: 14px; }
+        .trip-time { color: #6b7280; font-size: 13px; margin: 4px 0; }
+        .trip-content { color: #1f2937; font-size: 15px; line-height: 1.4; }
+        .trip-owner { display: inline-block; margin-top: 4px; padding: 2px 8px; background: #f0f7ff; color: #2563eb; border-radius: 12px; font-size: 12px; }
+        .delete-btn { float: right; color: #ef4444; background: none; border: none; padding: 0; font-size: 12px; cursor: pointer; }
+        .tip { color: #9ca3af; font-size: 13px; margin-top: 8px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 行程编辑表单 -->
+        <div class="card">
+            <h3>添加行程</h3>
+            <div class="form-group">
+                <label for="trip-date">日期</label>
+                <input type="date" id="trip-date" required>
+            </div>
+            <div class="form-group">
+                <label for="trip-time">时间段</label>
+                <input type="text" id="trip-time" placeholder="例：09:00-11:30 或 全天">
+            </div>
+            <div class="form-group">
+                <label for="trip-location">地点</label>
+                <input type="text" id="trip-location" placeholder="例：广州塔、珠江新城地铁站">
+            </div>
+            <div class="form-group">
+                <label for="trip-content">事项描述</label>
+                <textarea id="trip-content" rows="2" placeholder="例：参观广州塔，登塔观景"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="trip-owner">负责人</label>
+                <select id="trip-owner" required>
+                    <option value="">选择负责人</option>
+                    <option value="A">负责人A</option>
+                    <option value="B">负责人B</option>
+                </select>
+            </div>
+            <button onclick="addTrip()">添加到行程</button>
+            <div class="tip">✅ 添加后实时同步给对方 | 可修改负责人名称（代码内调整）</div>
+        </div>
+
+        <!-- 合并行程浏览 -->
+        <div class="card">
+            <h3>合并行程（按日期排序）</h3>
+            <div id="trip-list" class="trip-list">
+                <!-- 行程项会在这里动态生成 -->
+                <div class="trip-item" style="text-align: center; color: #9ca3af;">
+                    暂无行程，添加后实时显示...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 实时协作依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/sharedb@1.10.0/dist/sharedb.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+
+    <script>
+        // 1. 连接实时同步服务器（测试用，正式建议自行部署）
+        const socket = io('https://share-db-test-server.herokuapp.com');
+        const connection = new ShareDB.Connection(socket);
+        // 行程文档ID（两人需用同一ID，可修改为自定义字符串，如"guangzhou-trip-2024"）
+        const doc = connection.get('collab-trips', 'wechat-trip-collab-456');
+
+        // 2. 初始化行程数据（存储为数组，包含多个行程项）
+        let tripData = [];
+
+        // 3. 连接文档并同步数据
+        doc.subscribe(() => {
+            // 初始化数据（首次打开为空数组）
+            tripData = doc.data?.trips || [];
+            renderTrips(); // 渲染行程列表
+
+            // 监听服务器数据变更，实时同步到本地
+            doc.on('op', () => {
+                tripData = doc.data?.trips || [];
+                renderTrips();
+            });
+        });
+
+        // 首次打开时创建行程数组
+        doc.fetch(err => {
+            if (err) throw err;
+            if (!doc.type) doc.create({ trips: [] });
+        });
+
+        // 4. 添加行程项
+        function addTrip() {
+            const date = document.getElementById('trip-date').value;
+            const time = document.getElementById('trip-time').value;
+            const location = document.getElementById('trip-location').value;
+            const content = document.getElementById('trip-content').value;
+            const owner = document.getElementById('trip-owner').value;
+
+            // 简单校验
+            if (!date || !owner) {
+                alert('请填写日期和负责人！');
+                return;
+            }
+
+            // 生成唯一ID（避免重复）
+            const tripId = Date.now().toString();
+
+            // 新增行程项
+            const newTrip = {
+                id: tripId,
+                date,
+                time: time || '无具体时间',
+                location: location || '无具体地点',
+                content: content || '无描述',
+                owner
+            };
+
+            // 更新本地数据并同步到服务器
+            tripData.push(newTrip);
+            doc.submitOp([{ p: ['trips'], oi: tripData }]);
+
+            // 清空表单
+            document.getElementById('trip-time').value = '';
+            document.getElementById('trip-location').value = '';
+            document.getElementById('trip-content').value = '';
+        }
+
+        // 5. 删除行程项
+        function deleteTrip(tripId) {
+            // 过滤掉要删除的行程项
+            tripData = tripData.filter(trip => trip.id !== tripId);
+            // 同步到服务器
+            doc.submitOp([{ p: ['trips'], oi: tripData }]);
+        }
+
+        // 6. 渲染行程列表（按日期排序，直观展示）
+        function renderTrips() {
+            const tripListEl = document.getElementById('trip-list');
+
+            // 无行程时显示提示
+            if (tripData.length === 0) {
+                tripListEl.innerHTML = `
+                    <div class="trip-item" style="text-align: center; color: #9ca3af;">
+                        暂无行程，添加后实时显示...
+                    </div>
+                `;
+                return;
+            }
+
+            // 按日期排序（升序）
+            const sortedTrips = [...tripData].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            // 生成行程HTML
+            let tripHtml = '';
+            sortedTrips.forEach(trip => {
+                tripHtml += `
+                    <div class="trip-item">
+                        <span class="trip-date">${formatDate(trip.date)}</span>
+                        <button class="delete-btn" onclick="deleteTrip('${trip.id}')">删除</button>
+                        <div class="trip-time">${trip.time} | ${trip.location}</div>
+                        <div class="trip-content">${trip.content}</div>
+                        <span class="trip-owner">负责人：${trip.owner}</span>
+                    </div>
+                `;
+            });
+
+            tripListEl.innerHTML = tripHtml;
+        }
+
+        // 辅助函数：格式化日期（YYYY-MM-DD → 年-月-日）
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+        }
+
+        // 初始化日期为今天
+        document.getElementById('trip-date').valueAsDate = new Date();
+    </script>
+</body>
+</html>
